@@ -1,0 +1,107 @@
+import telebot
+import random
+import datetime
+import json
+import os
+import time
+
+BOT_TOKEN = "8397096460:AAFaipDEsVl-PLNBZKPsMqfNQZ5OwYs9OxM"
+bot = telebot.TeleBot(BOT_TOKEN)
+
+DATA_FILE = "data.json"
+
+# === Загружаем сохранённые данные ===
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        players_iq = data.get("players_iq", {})
+        last_used = {int(k): datetime.datetime.fromisoformat(v) for k, v in data.get("last_used", {}).items()}
+else:
+    players_iq = {}
+    last_used = {}
+
+EVENTS = [
+    ("Вам попался эдит с сигмой! +5 к IQ", 5, 60),
+    ("Вы прочитали несколько страниц книги Дэвида Гоггинса! +10 к IQ", 10, 30),
+    ("Вам попался видео про Dark fantasy! +10 к IQ", 10, 25),
+    ("Вы устроили беседу с самим собой! +12 к IQ", 12, 19),
+    ("Вы впервые в жизни открыли книгу! +6 к IQ", 6, 30),
+    ("Вас укусил паук и вы захотели прыгать по крышам,но сломали ногу... -10 к IQ", -10, 8),
+    ("У вас появились мысли изменить свое будущее! +9 к IQ", 9, 15),
+    ("Вы послушали песню Цоя! +11 к IQ", 11, 14),
+    ("Вы посмотрели 8 часов подкаста о философии! +15 к IQ", 15, 5),
+    ("Вы послушали 1 песню Джаста! +1 к IQ", 1, 1),
+    ("Вам попался фурри видео. -15 к IQ", -13, 8),
+    ("Вы стукнулись головой об стенку. -10 к IQ", -10, 10),
+    ("Вы посмотрели аниме. -5 к IQ", -5, 15),
+    ("Ничего не надо,брат,просто подарок от меня. +10 к IQ", 10, 15),
+]
+
+# === Сохраняем данные ===
+def save_data():
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump({
+            "players_iq": players_iq,
+            "last_used": {k: v.isoformat() for k, v in last_used.items()}
+        }, f, ensure_ascii=False, indent=2)
+
+def weighted_random_event():
+    total_weight = sum(e[2] for e in EVENTS)
+    r = random.uniform(0, total_weight)
+    cumulative = 0
+    for event, change, weight in EVENTS:
+        cumulative += weight
+        if r <= cumulative:
+            return event, change
+
+def can_use(user_id):
+    now = datetime.datetime.now()
+    last = last_used.get(user_id)
+    if not last:
+        return True
+    diff = now - last
+    return diff.total_seconds() >= 12 * 3600  # 12 часов
+
+@bot.message_handler(commands=['rofle'])
+def rofle(message):
+    user_id = message.from_user.id
+    username = message.from_user.first_name
+
+    if not can_use(user_id):
+        bot.reply_to(message, "⏰ Вы уже активировали рофл! Подождите 12 часов 😉")
+        return
+
+    event, change = weighted_random_event()
+    iq = players_iq.get(str(user_id), 100) + change
+    players_iq[str(user_id)] = iq
+    last_used[user_id] = datetime.datetime.now()
+
+    save_data()  # сохраняем после каждого действия
+
+    text = f"{event}\n\n🧩 {username}, теперь у вас {iq} IQ!"
+    bot.reply_to(message, text)
+
+@bot.message_handler(commands=['top'])
+def top_players(message):
+    if not players_iq:
+        bot.reply_to(message, "😴 Пока никто не участвовал.")
+        return
+
+    sorted_players = sorted(players_iq.items(), key=lambda x: x[1], reverse=True)
+    text = "🏆 Топ игроков по IQ:\n\n"
+    for i, (uid, iq) in enumerate(sorted_players[:10], start=1):
+        text += f"{i}. {iq} IQ\n"
+
+    bot.reply_to(message, text)
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    text = (
+        "Привет! Я IQ-рофл-бот 🤖\n\n"
+        "🧩 Используй /rofle — чтобы испытать судьбу (раз в 12 часов)\n"
+        "🏆 Посмотреть рейтинг — /top"
+    )
+    bot.reply_to(message, text)
+
+print("✅ Бот запущен...")
+bot.polling(none_stop=True)
